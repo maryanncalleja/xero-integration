@@ -13,7 +13,7 @@ const upload = multer({ dest: 'uploads/' });
 // Xero app credentials
 const CLIENT_ID = '93B4125E75714BCCBB2B3CAB4E5AC7CF';
 const CLIENT_SECRET = 'm_2kdSW-3SkAzHYaIvPt8yhzSEkVk8myxfhIVrnAgzkBD9Za';
-const REDIRECT_URI = 'http://localhost:5000/callback';
+const REDIRECT_URI = 'https://xero-integration-p55k.onrender.com/callback';
 const SCOPES = 'openid profile email accounting.transactions offline_access';
  
 let tokens = {};
