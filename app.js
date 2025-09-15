@@ -185,7 +185,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     // Get or create ContactID in Xero
     async function get_or_create_contact_id(contactName) {
         try {
-	    await refreshTokenIfNeeded(); // refresh before making request
             const response = await axios.get('https://api.xero.com/api.xro/2.0/Contacts', {
                 headers: {
                     'Authorization': `Bearer ${tokens.access_token}`,
