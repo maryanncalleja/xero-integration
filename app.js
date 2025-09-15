@@ -19,6 +19,35 @@ const SCOPES = 'openid profile email accounting.transactions offline_access';
 let tokens = {};
 let tenant_id = null;
 let poPayload = null;
+
+async function refreshAccessToken() {
+    if (!tokens.refresh_token) {
+        throw new Error("No refresh token available");
+    }
+
+    try {
+        const response = await axios.post('https://identity.xero.com/connect/token',
+            new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: tokens.refresh_token,
+                client_id: CLIENT_ID,
+                client_secret: CLIENT_SECRET
+            }).toString(),
+            {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            }
+        );
+
+        tokens = response.data; // Save new access + refresh token
+        console.log("🔄 Access token refreshed");
+    } catch (error) {
+        console.error("❌ Failed to refresh token:", error.response?.data || error.message);
+        throw new Error("Failed to refresh token");
+    }
+}
+
  
 // Middleware for JSON handling
 app.use(bodyParser.json());
@@ -183,7 +212,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     }));
  
     // Get or create ContactID in Xero
-    async function get_or_create_contact_id(contactName) {
+    async function get_or_create_contact_id(contactName, retried = false) {
         try {
             const response = await axios.get('https://api.xero.com/api.xro/2.0/Contacts', {
                 headers: {
@@ -197,9 +226,9 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 return response.data.Contacts[0].ContactID;
             } else {
                 const newContactResponse = await axios.post('https://api.xero.com/api.xro/2.0/Contacts', {
-                    Contacts: {
-                        Name: contactName
-                    }
+                    Contacts: [
+                        { Name: contactName }
+                    ]
                 }, {
                     headers: {
                         'Authorization': `Bearer ${tokens.access_token}`,
@@ -211,9 +240,15 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 return newContactResponse.data.Contacts[0].ContactID;
             }
         } catch (error) {
-            console.error("❌ FULL ERROR OBJECT:", JSON.stringify(error.response?.data || error, null, 2));
-            throw new Error(error.response?.data?.Message || 'Error getting/creating contact');
-        }
+		if (error.response?.status === 401 && !retried) {
+		   console.log("🔐 Token expired. Attempting to refresh...");
+		   await refreshAccessToken();		
+		   return await get_or_create_contact_id(contactName, true);
+            	} else {
+		   console.error("❌ Error in get_or_create_contact_id:", error.response?.data || error.message);
+	           throw new Error(error.response?.data?.Message || "Error getting/creating contact");
+        	}
+	}
     }
  
     let contactId;
