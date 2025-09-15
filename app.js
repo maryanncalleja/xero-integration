@@ -197,7 +197,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 return response.data.Contacts[0].ContactID;
             } else {
                 const newContactResponse = await axios.post('https://api.xero.com/api.xro/2.0/Contacts', {
-                    Contact: {
+                    Contacts: {
                         Name: contactName
                     }
                 }, {
@@ -208,11 +208,11 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                     }
                 });
  
-                return newContactResponse.data.Contact.ContactID;
+                return newContactResponse.data.Contacts[0].ContactID;
             }
         } catch (error) {
-            console.error("❌ Error getting or creating contact:", error);
-            throw new Error('Error getting/creating contact');
+            console.error("❌ FULL ERROR OBJECT:", JSON.stringify(error.response?.data || error, null, 2));
+            throw new Error(error.response?.data?.Message || 'Error getting/creating contact');
         }
     }
  
