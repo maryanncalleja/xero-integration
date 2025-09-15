@@ -211,8 +211,8 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 return newContactResponse.data.Contacts.ContactID;
             }
         } catch (error) {
-            console.error("Error getting or creating contact:", error);
-            throw new Error('Error getting/creating contact');
+            console.error("❌ Error getting or creating contact:", error.response?.data || error.message || error);
+            throw new Error(error.response?.data?.Message || 'Error getting/creating contact');
         }
     }
  
