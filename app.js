@@ -5,7 +5,6 @@ const path = require('path');
 const bodyParser = require('body-parser');
 const fs = require('fs');
 const { DateTime } = require('luxon');
-const xlsx = require('xlsx');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
@@ -13,64 +12,38 @@ const upload = multer({ dest: 'uploads/' });
 // Xero app credentials
 const CLIENT_ID = '93B4125E75714BCCBB2B3CAB4E5AC7CF';
 const CLIENT_SECRET = 'm_2kdSW-3SkAzHYaIvPt8yhzSEkVk8myxfhIVrnAgzkBD9Za';
-const REDIRECT_URI = 'https://xero-integration-p55k.onrender.com/callback';
+const REDIRECT_URI = 'http://localhost:5000/callback';
 const SCOPES = 'openid profile email accounting.transactions offline_access';
 
 let tokens = {};
 let tenant_id = null;
-let poPayload = null;
 
-// Refresh access token using the refresh_token
-async function refreshAccessToken() {
-    if (!tokens.refresh_token) {
-        throw new Error("No refresh token available");
-    }
-
-    try {
-        const response = await axios.post('https://identity.xero.com/connect/token',
-            new URLSearchParams({
-                grant_type: 'refresh_token',
-                refresh_token: tokens.refresh_token,
-                client_id: CLIENT_ID,
-                client_secret: CLIENT_SECRET
-            }).toString(),
-            {
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                }
-            }
-        );
-
-        tokens = response.data;
-        console.log("🔄 Access token refreshed");
-    } catch (error) {
-        console.error("❌ Failed to refresh token:", error.response?.data || error.message);
-        throw new Error("Failed to refresh token");
-    }
-}
-
-// Middleware
+// Middleware for JSON handling
 app.use(bodyParser.json());
 app.set('view engine', 'ejs');
 
-// Step 1: Auth redirect
+// Step 1: Redirect to Xero for Authorization
 app.get('/', (req, res) => {
     const authUrl = `https://login.xero.com/identity/connect/authorize?` +
-        `response_type=code&` +
-        `client_id=${CLIENT_ID}&` +
-        `redirect_uri=${encodeURIComponent(REDIRECT_URI)}&` +
-        `scope=${encodeURIComponent(SCOPES)}&` +
-        `state=12345`;
+                    `response_type=code&` +
+                    `client_id=${CLIENT_ID}&` +
+                    `redirect_uri=${encodeURIComponent(REDIRECT_URI)}&` +
+                    `scope=${encodeURIComponent(SCOPES)}&` +
+                    `state=12345`;
     res.redirect(authUrl);
 });
 
-// Step 2: Handle callback
+// Step 2: Callback to get authorization code and exchange tokens
 app.get('/callback', async (req, res) => {
     const error = req.query.error;
-    if (error) return res.send(`❌ Authorization failed: ${error}`);
+    if (error) {
+        return res.send(`❌ Authorization failed: ${error}`);
+    }
 
     const code = req.query.code;
-    if (!code) return res.send('⚠️ No authorization code received.');
+    if (!code) {
+        return res.send('⚠️ No authorization code received.');
+    }
 
     try {
         const tokenResponse = await axios.post('https://identity.xero.com/connect/token', new URLSearchParams({
@@ -85,6 +58,7 @@ app.get('/callback', async (req, res) => {
 
         tokens = tokenResponse.data;
 
+        // Get tenant ID
         const connectionsResponse = await axios.get('https://api.xero.com/connections', {
             headers: {
                 'Authorization': `Bearer ${tokens.access_token}`
@@ -92,167 +66,127 @@ app.get('/callback', async (req, res) => {
         });
 
         const tenants = connectionsResponse.data;
-        if (tenants.length === 0) return res.send('❌ No Xero tenant found.');
+        if (tenants.length === 0) {
+            return res.send('❌ No Xero tenant found.');
+        }
 
         tenant_id = tenants[0].tenantId;
-        res.send(`✅ Authorization successful!<br><br>Now upload your Excel file at <a href="/upload">/upload</a>`);
+        res.send(`
+            ✅ Authorization successful!<br><br>
+            Now upload your Excel file at <a href="/upload">/upload</a>
+        `);
     } catch (error) {
         console.error(error);
         res.send(`❌ Failed to get access token: ${error.message}`);
     }
 });
 
-// Upload form
+// Upload Excel file and build PO
 app.get('/upload', (req, res) => {
-    res.render('upload');
+    res.render('upload');  // Render a file upload form (we'll create this template)
 });
 
-// Handle Excel upload
-app.post('/upload', upload.single('file'), async (req, res) => {
+app.post('/upload', upload.single('file'), (req, res) => {
     const file = req.file;
-    if (!file) return res.status(400).send('No file uploaded');
+    if (!file) {
+        return res.status(400).send('No file uploaded');
+    }
 
+    // Parse Excel file here, using a library like 'xlsx' or 'exceljs'
+    // Here's a simplified approach using 'xlsx' for demonstration
+    const xlsx = require('xlsx');
     const workbook = xlsx.readFile(file.path);
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
     const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
-    const extractColumnValues = (fieldName) => {
-        for (let rowIdx = 0; rowIdx < data.length; rowIdx++) {
-            for (let colIdx = 0; colIdx < data[rowIdx].length; colIdx++) {
-                const cellValue = String(data[rowIdx][colIdx]).trim();
-                if (cellValue.toLowerCase() === fieldName.toLowerCase()) {
-                    const values = [];
-                    for (let r = rowIdx + 1; r < data.length; r++) {
-                        const value = data[r][colIdx];
-                        if (!value) break;
-                        values.push(value);
-                    }
-                    return values;
-                }
-            }
-        }
-        return null;
-    };
+    // Extract information and build PO (similar to Python code logic)
+    const lineItems = extractLineItems(data);
+    const quoteInfo = extractQuoteInfo(data);
 
-    const extractQuoteInfo = (sectionTitle = "QUOTE INFORMATION") => {
-        const quoteInfo = {};
-        for (let i = 0; i < data.length; i++) {
-            for (let j = 0; j < data[i].length; j++) {
-                const cell = String(data[i][j]).trim();
-                if (cell === sectionTitle) {
-                    for (let k = i + 1; k < i + 10 && k < data.length; k++) {
-                        const row = data[k].filter(val => val != null && val !== '');
-                        for (let idx = 0; idx < row.length - 1; idx += 2) {
-                            quoteInfo[row[idx]] = row[idx + 1];
-                        }
-                    }
-                    return quoteInfo;
-                }
-            }
-        }
-        return {};
-    };
+    // Prepare PO data
+    const poData = buildPoData(lineItems, quoteInfo);
 
-    const itemNumbers = extractColumnValues("Item Number") || [];
-    const descriptions = extractColumnValues("Description") || [];
-    const quantities = extractColumnValues("Qty") || [];
-    const unitPrices = extractColumnValues("Unit Price") || [];
-    const quoteInfo = extractQuoteInfo();
+    // Store PO data for later sending to Xero
+    global.poPayload = poData;
 
-    const contactName = quoteInfo["Reseller Contact"] || "Unknown Supplier";
-    const reference = quoteInfo["Sales Quotation"] || "AutoPO";
-    let currencyCode = quoteInfo["Currency"] || "AUD";
-    if (!["AUD", "NZD"].includes(currencyCode)) currencyCode = "AUD";
+    res.render('po', { poJson: JSON.stringify(poData, null, 4) });
+});
 
-    const rawDate = quoteInfo["Validity End Date"] || "";
-    let deliveryDate = DateTime.now().toISODate();
-    try {
-        deliveryDate = rawDate ? DateTime.fromFormat(rawDate, "dd/MM/yyyy").toISODate() : deliveryDate;
-    } catch {}
+function extractLineItems(data) {
+    const descriptions = extractColumnValues(data, "Description") || [];
+    const quantities = extractColumnValues(data, "Qty") || [];
+    const unitPrices = extractColumnValues(data, "Unit Price") || [];
 
-    const lineItems = itemNumbers.map((_, i) => ({
-        Description: String(descriptions[i]) || '',
-        Quantity: parseFloat(quantities[i]) || 0,
-        UnitAmount: parseFloat(unitPrices[i]) || 0,
+    return descriptions.map((desc, i) => ({
+        Description: desc,
+        Quantity: parseFloat(quantities[i] || 1),
+        UnitAmount: parseFloat(unitPrices[i] || 0),
         AccountCode: '400',
         TaxType: 'INPUT'
     }));
+}
 
-    // Get or create ContactID
-    async function get_or_create_contact_id(contactName, retried = false) {
-        try {
-            const response = await axios.get('https://api.xero.com/api.xro/2.0/Contacts', {
-                headers: {
-                    'Authorization': `Bearer ${tokens.access_token}`,
-                    'Xero-tenant-id': tenant_id
-                },
-                params: { name: contactName }
-            });
-
-            if (response.data.Contacts.length > 0) {
-                return response.data.Contacts[0].ContactID;
-            } else {
-                const newContactResponse = await axios.post(
-                    'https://api.xero.com/api.xro/2.0/Contacts',
-                    {
-                        Contacts: [
-                            { Name: contactName }
-                        ]
-                    },
-                    {
-                        headers: {
-                            'Authorization': `Bearer ${tokens.access_token}`,
-                            'Xero-tenant-id': tenant_id,
-                            'Content-Type': 'application/json'
-                        }
-                    }
-                );
-
-                return newContactResponse.data.Contacts[0].ContactID;
+function extractColumnValues(data, fieldName) {
+    for (let rowIdx = 0; rowIdx < data.length; rowIdx++) {
+        for (let colIdx = 0; colIdx < data[rowIdx].length; colIdx++) {
+            if (String(data[rowIdx][colIdx]).toLowerCase() === fieldName.toLowerCase()) {
+                return data.slice(rowIdx + 1).map(row => row[colIdx]).filter(value => value);
             }
-        } catch (error) {
-            if (error.response?.status === 401 && !retried) {
-                console.log("🔐 Token expired. Attempting to refresh...");
-                await refreshAccessToken();
-                return await get_or_create_contact_id(contactName, true);
-            }
-            console.error("❌ Error in get_or_create_contact_id:", error.response?.data || error.message);
-            throw new Error(error.response?.data?.Message || "Error getting/creating contact");
         }
     }
+    return null;
+}
 
-    let contactId;
-    try {
-        contactId = await get_or_create_contact_id(contactName);
-    } catch (e) {
-        return res.status(400).send(`❌ Error getting/creating contact: ${e.message}`);
+function extractQuoteInfo(data) {
+    let quoteInfo = {};
+    const sectionTitle = 'QUOTE INFORMATION';
+    for (let i = 0; i < data.length; i++) {
+        if (data[i].includes(sectionTitle)) {
+            const startRow = i + 1;
+            for (let j = startRow; j < startRow + 10; j++) {
+                if (data[j]) {
+                    for (let k = 0; k < data[j].length; k += 2) {
+                        const key = String(data[j][k]).trim();
+                        const value = String(data[j][k + 1]).trim();
+                        if (key) {
+                            quoteInfo[key] = value;
+                        }
+                    }
+                }
+            }
+            break;
+        }
     }
+    return quoteInfo;
+}
 
-    const toXeroDateFormat = (date) => `/Date(${DateTime.fromISO(date).toMillis()}+0000)/`;
+function buildPoData(lineItems, quoteInfo) {
+    const contactName = quoteInfo["Reseller Contact"] || "Unknown Supplier";
+    const reference = quoteInfo["Sales Quotation"] || "AutoPO";
+    const currencyCode = quoteInfo["Currency"] || "AUD";
+    const rawDate = quoteInfo["Validity End Date"];
+    const deliveryDate = rawDate ? DateTime.fromFormat(rawDate, 'dd/MM/yyyy').toISODate() : DateTime.now().toISODate();
 
-    poPayload = {
-        Contact: {
-            ContactID: contactId,
-            Name: contactName
-        },
-        Date: toXeroDateFormat(DateTime.now().toISO()),
-        DeliveryDate: toXeroDateFormat(deliveryDate),
+    return {
+        Contact: { Name: contactName },
+        Date: DateTime.now().toISODate(),
+        DeliveryDate: deliveryDate,
         LineItems: lineItems,
-        DeliveryAddress: "Enablis Office",
         Reference: reference,
         CurrencyCode: currencyCode,
-        Status: "DRAFT"
+        Status: 'DRAFT'
     };
+}
 
-    res.render('po', { poJson: JSON.stringify(poPayload, null, 4) });
-});
-
-// Send PO to Xero
+// Send the PO to Xero
 app.post('/send_po', async (req, res) => {
-    if (!poPayload) return res.status(400).send('❌ No PO payload available. Upload an Excel file first.');
+    if (!global.poPayload) {
+        return res.status(400).send('❌ No PO payload available. Upload an Excel file first.');
+    }
 
     try {
-        const response = await axios.post('https://api.xero.com/api.xro/2.0/PurchaseOrders', poPayload, {
+        const response = await axios.post('https://api.xero.com/api.xro/2.0/PurchaseOrders', global.poPayload, {
             headers: {
                 'Authorization': `Bearer ${tokens.access_token}`,
                 'Xero-tenant-id': tenant_id,
@@ -262,24 +196,11 @@ app.post('/send_po', async (req, res) => {
 
         res.send(`✅ Purchase Order sent successfully!<br><pre>${JSON.stringify(response.data, null, 2)}</pre>`);
     } catch (error) {
-        if (error.response) {
-            const apiError = error.response.data;
-            console.error('❌ Xero API Error Response:', JSON.stringify(apiError, null, 2));
-            const validationErrors = apiError.Elements?.[0]?.ValidationErrors || [];
-            const errorMessages = validationErrors.map(err => `- ${err.Message}`).join('\n');
-
-            return res.status(400).send(`
-                ❌ Xero Validation Error(s):<br><br>
-                <pre>${errorMessages || apiError.Message}</pre>
-            `);
-        } else {
-            console.error('❌ Request Error:', error.message);
-            res.status(500).send(`❌ Failed to send PO: ${error.message}`);
-        }
+        res.status(500).send(`❌ Failed to send PO: ${error.message}`);
     }
 });
 
 // Start the server
 app.listen(5000, () => {
-    console.log('🚀 Server running on http://localhost:5000');
+    console.log('Server running on http://localhost:5000');
 });
