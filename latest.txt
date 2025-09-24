@@ -113,8 +113,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     if (!file) return res.status(400).send('No file uploaded');
 
     const workbook = xlsx.readFile(file.path);
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
     const extractColumnValues = (fieldName) => {
@@ -123,19 +122,15 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 const cellValue = String(data[rowIdx][colIdx]).trim();
                 if (cellValue.toLowerCase() === fieldName.toLowerCase()) {
                     const values = [];
-		    let currentRow = rowIdx + 1;
-                    while (currentRow < data.length) {
-			const value = data[currentRow][colIdx];
-                    	if (value === null || value === undefined || value === '') {
-                           break;
-			}
+                    for (let r = rowIdx + 1; r < data.length; r++) {
+                        const value = data[r][colIdx];
+                        if (!value) break;
                         values.push(value);
-                        currentRow++;
-                    	}
-                    	return values;
-                   }
-            	}
-	    }
+                    }
+                    return values;
+                }
+            }
+        }
         return null;
     };
 
