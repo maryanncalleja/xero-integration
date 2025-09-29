@@ -111,8 +111,10 @@ app.get('/callback', async (req, res) => {
 
         res.send(`✅ Authorization successful!<br><br>Now upload your Excel file at <a href="/upload">/upload</a>`);
     } catch (error) {
-        console.error(error);
-        res.send(`❌ Failed to get access token: ${error.message}`);
+        console.error("❌ Token exchange failed");
+	console.error("Status:", error.response?.status);
+	console.error("Data:", error.response?.data);
+        res.send(`❌ Failed to get access token: ${error.response?.data?.error_description || error.message}`);
     }
 });
 
