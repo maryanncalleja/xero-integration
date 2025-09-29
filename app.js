@@ -70,6 +70,9 @@ app.get('/callback', async (req, res) => {
     if (error) return res.send(`❌ Authorization failed: ${error}`);
 
     const code = req.query.code;
+    console.log("🔁 Authorization code:", code);
+    console.log("📍 Redirect URI:", REDIRECT_URI);
+
     if (!code) return res.send('⚠️ No authorization code received.');
 
     try {
