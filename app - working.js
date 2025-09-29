@@ -221,10 +221,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
                 await refreshAccessToken();
                 return await get_or_create_contact_id(contactName, true);
             }
-            console.error("❌ Xero API error in get_or_create_contact_id:");
-            console.error("Status:", error.response?.status);
-            console.error("Data:", JSON.stringify(error.response?.data, null, 2));
-
+            console.error("❌ Error in get_or_create_contact_id:", error.response?.data || error.message);
             throw new Error(error.response?.data?.Message || "Error getting/creating contact");
         }
     }
