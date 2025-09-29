@@ -95,6 +95,17 @@ app.get('/callback', async (req, res) => {
         if (tenants.length === 0) return res.send('❌ No Xero tenant found.');
 
         tenant_id = tenants[0].tenantId;
+
+	const orgResponse = await axios.get('https://api.xero.com/api.xro/2.0/Organisations', {
+	    headers: {
+		'Authorization': `Bearer ${tokens.access_token}`,
+		'Xero-tenant-id': tenant_id
+	    }
+	});
+	console.log("🧾 Connected Organization:", orgResponse.data.Organisations[0].Name);
+	console.log("🔑 Tenant ID:", tenant_id);
+	console.log("🪪 Tokens:", tokens);
+
         res.send(`✅ Authorization successful!<br><br>Now upload your Excel file at <a href="/upload">/upload</a>`);
     } catch (error) {
         console.error(error);
@@ -165,6 +176,9 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     const quoteInfo = extractQuoteInfo();
 
     const contactName = quoteInfo["Reseller Contact"] || "Unknown Supplier";
+    if (!contactName || contactName.trim() === '' || contactName === "Unknown Supplier") {
+    	return res.status(400).send("❌ Contact name is missing or invalid in the uploaded Excel file.");
+    }
     const reference = quoteInfo["Sales Quotation"] || "AutoPO";
     let currencyCode = quoteInfo["Currency"] || "AUD";
     if (!["AUD", "NZD"].includes(currencyCode)) currencyCode = "AUD";
@@ -229,11 +243,15 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         }
     }
 
+
+    console.log("📨 Attempting to find or create contact:", contactName);
+    console.log("🏢 Using tenant:", tenant_id);
+
     let contactId;
     try {
         contactId = await get_or_create_contact_id(contactName);
     } catch (e) {
-        return res.status(400).send(`❌ Error getting/creating contact: ${e.message}`);
+        return res.status(400).send(`❌ Error getting/creating contact:<br><pre>${e.message}</pre>`);
     }
 
     const toXeroDateFormat = (date) => `/Date(${DateTime.fromISO(date).toMillis()}+0000)/`;
